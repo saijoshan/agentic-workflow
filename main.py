@@ -45,7 +45,6 @@ async def run_workflow(input: InputPayload):
                 if ('__interrupt__' in event):  
                     all_messages.append(event['__interrupt__'][-1].value)
         else:
-            print('>>> resuming flow')
             for event in workflow_app.stream(Command(resume=input.args),
                                     config,
                                     stream_mode="values"):

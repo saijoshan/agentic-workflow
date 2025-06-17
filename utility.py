@@ -27,4 +27,4 @@ def filter_history(messages):
             elif 'Tool' in msg_type:
                 tool_name = message.get('name', 'unknown_tool') if isinstance(message, dict) else getattr(message, 'name', 'unknown_tool')
                 result.append(f"TOOL: {tool_name} returned -> {content}")
-    return '\n'.join(result)
+    return '\n'.join(result), result

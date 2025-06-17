@@ -12,7 +12,7 @@ import json
 class DataCollectionState(MessagesState):
     task: str
     plan: list
-    response: str
+    current_instruction: str
 
 create_data_collection_tool = BasicToolNode([create_data_collection])
 get_all_data_collection_tool = BasicToolNode([get_all_data_collection])
@@ -31,21 +31,19 @@ def get_memory():
 
 def run_planner(state):
     planner = get_planner()
-    plan = planner.invoke({"messages": [("user", state["task"])]})
-    print({"plan": plan.steps})
-    return {"plan": plan.steps}
+    plan = planner.invoke({"messages": [("user", state["task"])]})          
+    plan_str = '\n'.join(plan.steps)
+    print(f"main plan >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> {plan_str}")      
+    return {"plan": plan.steps, 'current_instruction': plan.steps[0]}
 
 def run_replanner(state):
-    replanner = get_replanner()
-    output = replanner.invoke({'task': state['task'], 'plan': state['plan'], 'history': filter_history(state['messages'])})
-    if isinstance(output.action, Response):
-        return {"response": output.action.response}
-    else:
-        return {"plan": output.action.steps}
+    message_Str, message_list = filter_history(state['messages'])
+    replanner = get_replanner(state['task'], state['plan'], message_Str)
+    return replanner
 
-def run_agent(state):
-    array = filter_history(state["messages"])
-    return get_main_agent(state['plan'][0])
+def run_agent(state):           
+    message_Str, message_list = filter_history(state['messages'])
+    return get_main_agent(state['current_instruction'], message_Str)  
 
 def should_continue(state):
     messages = state["messages"]
@@ -57,6 +55,8 @@ def should_continue(state):
         return "create_data_collection_tool"
     elif last_message.tool_calls[0]["name"] == "get_all_data_collections":
         return "get_all_data_collection_tool"
+    elif last_message.tool_calls[0]["name"] == "get_collection_by_name":
+        return "get_collection_by_name_tool"
     elif last_message.tool_calls[0]["name"] == "update_data_collection":
         return "update_data_collection_tool"
     elif last_message.tool_calls[0]["name"] == "delete_data_collection":
@@ -65,7 +65,7 @@ def should_continue(state):
         return "talk_to_human_tool"
     
 def should_end(state: DataCollectionState):
-    if "response" in state and state["response"]:
+    if state['current_instruction'] == 'END':
         return END
     else:
         return "agent"

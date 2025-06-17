@@ -66,7 +66,6 @@ def create_data_collection(name: str, type: str, description: str):
     elif response["type"] == "No":
         return {"output": "user did not agree to create the collection"}
 
-
 @tool("get_all_data_collections")
 def get_all_data_collection() -> str:
     """Get brief details of all existing data collections from the dashboard"""
@@ -78,16 +77,26 @@ def get_all_data_collection() -> str:
     except Exception as e:
         return f"Failed to fetch data collections: {str(e)}"
     
-@tool("get_all_data_collections")
-def get_collection_by_name() -> str:
-    """Get complete details (including id) of a data collection by name"""
+class DataCollectionByName(BaseModel):
+    """Get complete details of a specific collections including its id"""
+    name: str = Field(description="Name of the data collection")
+    
+@tool("get_collection_by_name", args_schema=DataCollectionByName)
+def get_collection_by_name(name: str) -> str:
     try:
-        response = requests.get("http://localhost:3000/api/boxes")
+        response = requests.get(
+            "http://localhost:3000/api/boxes",
+            params={"name": name}
+        )
         response.raise_for_status()
         data = response.json()
-        return data["boxes"]
+        return data["box"]  # because your Next.js returns { box: {...} }
+    except requests.HTTPError as e:
+        if response.status_code == 404:
+            return f"Data collection with name '{name}' not found."
+        return f"HTTP error: {str(e)}"
     except Exception as e:
-        return f"Failed to fetch data collections: {str(e)}"
+        return f"Failed to fetch data collection: {str(e)}"
     
 
 class UpdateDataCollectionInputSchema(BaseModel):
@@ -131,38 +140,37 @@ class DeleteDataCollectionInputSchema(BaseModel):
     """Delete a Data Collection in the dashboard, 'id' is mandatory to use this tool"""
     id: str = Field(description="id of the data collection")
 
-@tool("delete_data_collection", args_schema=UpdateDataCollectionInputSchema)
-def delete_data_collection(id: str, name: str = None, description: str = None, type: str = None):
+@tool("delete_data_collection", args_schema=DeleteDataCollectionInputSchema)
+def delete_data_collection(id: str):
 
+    # Ask user for confirmation
     response = interrupt(
-        {'interrupt': f"Trying to delete the collection with args {{'name': '{name}', 'type': '{type}', 'description': '{description}'}}. "
-        "Please approve or reject.", 'args': {'name': name, 'type': type, 'description': description, 'send': 'Yes/No'}}
+        {
+            'interrupt': f"Trying to delete the collection with id: {id}. Please approve or reject.",
+            'args': {'send': 'Yes/No'}
+        }
     )
-    
+
     if response["send"] == "Yes":
-        # Prepare update data
-        update_data = {"id": id}
-        if name:
-            update_data["name"] = response['name']
-        if description:
-            update_data["description"] = response['description']
-        if type:
-            update_data["type"] = response['type']
-        
-        # Make API call
-        api_url = "http://localhost:3000/api/boxes"  # Update with your actual API URL
-        response = requests.put(api_url, json=update_data)
-        
-        if response.status_code == 200: 
-            return {'message': 'Successfully deleted'}
-        else:
-            return {'message': 'Backend api failed to delete, please try later'}
+        try:
+            # Call the DELETE API with id as a query parameter
+            api_url = "http://localhost:3000/api/boxes"
+            res = requests.delete(api_url, params={"id": id})
+
+            if res.status_code == 200:
+                return {'message': 'Successfully deleted'}
+            elif res.status_code == 404:
+                return {'message': 'Collection not found'}
+            else:
+                return {'message': f'Failed to delete: {res.status_code} {res.text}'}
+        except Exception as e:          
+            return {'message': f'Error during deletion: {str(e)}'}
     else:
-        return {"message": f"User, rejected to deketed the collection,"}
+        return {"message": "User rejected the deletion request."}
     
 
 class TalkToHuman(BaseModel):
-    """Talk to user or ask questions to the user"""
+    """Talk to user or ask questions or provide any insights to the user"""
 
     question: str = Field(description="A question to the user.")
 
@@ -170,4 +178,10 @@ class TalkToHuman(BaseModel):
 @tool("talk_to_human", args_schema=TalkToHuman)
 def talk_to_human(question: str):
     response = interrupt({'interrupt': question, 'args': {}})
-    return f'\nHuman: {response}'
+    # if response['proceed'] == 'Yes' and response['inputs'] != '':
+    #     return {"message": f"user inputs: {response['inputs']}"} 
+    # elif response['proceed'] == 'Yes' and response['inputs'] == '':
+    #     return {"message": f"thanks, now proceed"} 
+    # else:
+    #     return {"message": "User requested to end the complete execution"}  
+    return response

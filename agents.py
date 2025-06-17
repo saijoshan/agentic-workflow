@@ -23,7 +23,7 @@ class Plan(BaseModel):
     )
 
 class Act(BaseModel):
-    """Action to perform."""
+    """Updated execution plan"""
 
     action: Union[Response, Plan] = Field(
         description="Action to perform. If you want to respond to user, use Response. "
@@ -31,7 +31,7 @@ class Act(BaseModel):
     )
 
 
-def get_main_agent(query):
+def get_main_agent(query, metadata):
 
     model = init_chat_model("openai:gpt-4.1")
 
@@ -40,54 +40,78 @@ def get_main_agent(query):
     model = model.bind_tools(tools)    
 
     prompt = f"""
-    You are an expert data_collection manager inside a dashboard, you are equipped with necessary tools to complete user tasks.
-    Your goal is to complete user tasks and help the user with his queries. ALl the queries related to updating a collection forward it to update_collection_agent
-    without asking any further questions.
+    You are an expert data_collection manager inside a dashboard, you are equipped with necessary tools to complete given tasks
+    Your main goal is to complete the current task.
 
-    CURRENT USER QUERY
+    CURRENT TASK
     {query}
+
+    METADATA
+    {metadata}
     
     INSTRUCTIONS
-    - Think carefully based on the history provided and act accordingly (Do not do additional tasks on your own).
-    - You have an update_collection_agent under you, just forwards the task related to updating collections to update_collection_agent without asking questions.
+    - Just perform the tasks which are given to you(Do not do additional tasks on your own).
+    - Use the information mentioned in the metadata if you want.
     """
-
+    print(f"agent running with >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> {prompt}")
     response = model.invoke(prompt)
     return {"messages": [response]}
 
 def get_planner():
     class Plan(BaseModel):
-        """Plan to follow in future"""
+        """A clear, ordered list of executable steps for the agent."""
         steps: List[str] = Field(
-            description="List of concrete, ordered steps to follow. Each step must use only one tool."
+            description="Each step must clearly state ONE action using exactly ONE tool. Steps must be executable in order without ambiguity."
         )
 
     planner_prompt = ChatPromptTemplate.from_messages(
         [
             (
                 "system",
-                """You are a **Task Planner**, you are a part of a dashboard where user can create, update or delete data collections. Your job is to break down a user query into a clear, step-by-step execution plan for a multi-agent system automation.
+                """
+You are a **Precise Planner** for a dashboard automation system.
 
-## Available Tools:
-- **create_data_collection**: Create a collection (params: `name`, `type` ['General'|'Face Recognition'], `description`).
-- **get_all_data_collections**: Retrieve all existing collections.
-- **ask_user**: Ask the user for any missing parameter or clarification.
-- **update_collection_agent**: Update a collection (params: `exact_name`, `instruction`).
+Your role:  
+Given any user request about managing data collections, break it down into an ordered list of **atomic steps** for an agent to execute.
 
-## Guidelines:
-1. Use **exactly one tool per step**.
-2. Steps must be ordered logically: retrieve data before updating or creating.
-3. If any required information is missing, insert an **ask_user** step **immediately** before continuing.
-4. Use clear, executable instructions in each step.
-5. Only include relevant steps; do not hallucinate tools or actions.
-
-## Output Format:
-Return the plan as a numbered list of plain text steps.  
-Each step must clearly name the tool and what it will do.
+**Each step must do only ONE action using exactly ONE tool.**  
+Steps must be ordered logically. If any needed information is missing, **insert a step to ask the user before continuing.**
 
 ---
 
-Generate only the steps. Do not add extra commentary.
+## **Available Tools**
+
+- **create_data_collection**: Create a new data collection. Needs: `name`, `type` ('General' or 'Face Recognition'), `description`.
+- **get_all_data_collections**: Retrieve a list of all existing collections.
+- **get_collection_by_name**: Get details and ID of a specific collection by its name.
+- **update_data_collection**: Update a collection. Needs: `id` plus any of `name`, `type`, `description`.
+- **delete_data_collection**: Delete a collection by `id`.
+- **talk_to_human**: To explain user anything, provide user insights or ask the user any question to get missing information.
+
+---
+
+## **Guidelines**
+
+1 Use exactly ONE tool per step — no multi-tool actions.  
+2 Always retrieve collection IDs before updating or deleting.  
+3 If you don't have a required value (like a new description), insert a **talk_to_human** step immediately before the action.
+4 To explain anything to user or provide any collection info to user, add **talk_to_human** step. 
+5 Steps must be simple, direct instructions to the agent:           
+   Example:  
+   - "Get details of collection named 'My Collection' using get_collection_by_name"
+   - "Ask the user: What should be the new description for collection ID 123?"
+   - "Update collection with ID 123 using update_data_collection with the new description."
+
+6 Do not invent tools or actions that are not listed.   
+
+---
+
+## **Output Format**
+
+Return only the plan —  
+A numbered list of clear, plain-text steps, each describing which tool will be used and for what.
+
+Do not add extra explanation, apologies, or commentary.
 """,
             ),
             ("placeholder", "{messages}"),
@@ -101,28 +125,46 @@ Generate only the steps. Do not add extra commentary.
 
     return planner
 
-def get_replanner():
+def get_replanner(task, plan, history):
 
-    replanner_prompt = ChatPromptTemplate.from_template(
-        """For the given objective, come up with a simple step by step plan. \
-    This plan should involve individual tasks, that if executed correctly will yield the correct answer. Do not add any superfluous steps. \
-    The result of the final step should be the final answer. Make sure that each step has all the information needed - do not skip steps.
+    replanner_prompt = f"""
+You are a **Precise instructor** for an agentic system that executes one step at a time.
 
-    Your objective was this:
-    {task}
+## Objective:
+{task}
 
-    Your original plan was this:
-    {plan}
+## Original Plan:
+{plan}
 
-    You have currently done the follow steps:
-    {history}
+## Previous Step Results:
+{history}
 
-    Update your plan accordingly. If no more steps are needed and you can return to the user, then respond with that. Otherwise, fill out the plan. Only add steps to the plan that still NEED to be done. Do not return previously done steps as part of the plan."""
-    )
+---
+
+## **Your job:**
+
+1. Carefully Inspect the results of completed steps and identify the state of the task.
+2. Create a proper instruction for an agent with tool name and its parameters in a sentence.
+
+## **Agent has below tools:**
+- **create_data_collection**: Create a new data collection. Needs: `name`, `type` ('General' or 'Face Recognition'), `description`.
+- **get_all_data_collections**: Retrieve a list of all existing collections.
+- **get_collection_by_name**: Get details and ID of a specific collection by its name.
+- **update_data_collection**: Update a collection. Needs: `id` plus any of `name`, `type`, `description`.
+- **delete_data_collection**: Delete a collection by `id`.
+- **talk_to_human**: Provide user insights of any tool output or ask the user any question to get missing information or confirmation.
 
 
-    replanner = replanner_prompt | ChatOpenAI(
-        model="gpt-4.1", temperature=0
-    ).with_structured_output(Act)
+---
 
-    return replanner
+## **Output Format**
+- A clear single step instruction containing all the information.
+
+## IMPORTANT NOTE
+- Once all the steps are completed and the objective is achieved just return 'END' without any special characters.
+"""
+
+    llm = init_chat_model("openai:gpt-4.1")
+    response = llm.invoke(replanner_prompt)
+
+    return {'current_instruction': response.content}            
