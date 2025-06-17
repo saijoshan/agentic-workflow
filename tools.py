@@ -1,3 +1,4 @@
+from typing import Optional
 import requests
 from pydantic import BaseModel, Field
 from langchain_core.tools import tool
@@ -28,6 +29,7 @@ class BasicToolNode:
                     tool_call_id=tool_call["id"],
                 )
             )
+            break
         return {"messages": outputs}
 
 
@@ -101,17 +103,31 @@ def get_collection_by_name(name: str) -> str:
 
 class UpdateDataCollectionInputSchema(BaseModel):
     """Update a Data Collection in the dashboard, 'id' is mandatory to use this tool"""
-    id: str = Field(description="id of the data collection")
-    name: str = Field(description="same or new name for the data collection")
-    description: str = Field(description="same or new description for the data collection")
-    type: str = Field(description="same or new type for the data collection")
+    id: str = Field(description="id of the data collection")    
+    name: Optional[str] = Field(default=None, description="same or new name for the data collection")
+    description: Optional[str] = Field(default=None, description="same or new description for the data collection")
+    type: Optional[str] = Field(default=None, description="same or new type for the data collection")
 
-@tool("update_data_collection", args_schema=UpdateDataCollectionInputSchema)
-def update_data_collection(id: str, name: str = None, description: str = None, type: str = None):
+@tool("update_data_collection", args_schema=UpdateDataCollectionInputSchema)        
+def update_data_collection(id: str, name: Optional[str] = None, description: Optional[str] = None, type: Optional[str] = None):
+
+    update_args = {}
+    if name is not None:
+        update_args['name'] = name
+    if type is not None:
+        update_args['type'] = type
+    if description is not None:
+        update_args['description'] = description
+
+    # Human-friendly message
+    update_args_str = ', '.join(f"{k}: '{v}'" for k, v in update_args.items())
 
     response = interrupt(
-        {'interrupt': f"Trying to update the collection with args {{'name': '{name}', 'type': '{type}', 'description': '{description}'}}. "
-        "Please approve or suggest edits.", 'args': {'name': name, 'type': type, 'description': description, 'send': 'Yes/No', 'feedback': ''}}
+        {
+            'interrupt': f"Trying to update the collection with args {{{update_args_str}}}. "
+                         "Please approve or suggest edits.",
+            'args': {**update_args, 'send': 'Yes/No', 'feedback': ''}
+        }
     )
     
     if response["send"] == "Yes":

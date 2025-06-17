@@ -52,6 +52,7 @@ def get_main_agent(query, metadata):
     INSTRUCTIONS
     - Just perform the tasks which are given to you(Do not do additional tasks on your own).
     - Use the information mentioned in the metadata if you want.
+    - You must use only one tool at once.
     """
     print(f"agent running with >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> {prompt}")
     response = model.invoke(prompt)
@@ -69,7 +70,7 @@ def get_planner():
             (
                 "system",
                 """
-You are a **Precise Planner** for a dashboard automation system.
+You are a **Precise Planner** for a dashboard automation system with multiple data collections in it.
 
 Your role:  
 Given any user request about managing data collections, break it down into an ordered list of **atomic steps** for an agent to execute.
@@ -83,10 +84,10 @@ Steps must be ordered logically. If any needed information is missing, **insert 
 
 - **create_data_collection**: Create a new data collection. Needs: `name`, `type` ('General' or 'Face Recognition'), `description`.
 - **get_all_data_collections**: Retrieve a list of all existing collections.
-- **get_collection_by_name**: Get details and ID of a specific collection by its name.
+- **get_collection_by_name**: Get details along with ID of a specific collection by its name.
 - **update_data_collection**: Update a collection. Needs: `id` plus any of `name`, `type`, `description`.
 - **delete_data_collection**: Delete a collection by `id`.
-- **talk_to_human**: To explain user anything, provide user insights or ask the user any question to get missing information.
+- **talk_to_human**: To explain user anything, provide user insights or ask the user any question to get missing information.   
 
 ---
 
